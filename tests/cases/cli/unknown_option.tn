@@ -1,0 +1,5 @@
+// args: --bogus
+// expect-exit: 1
+// expect-stderr:
+// error: unknown option '--bogus'
+// usage: tern [--help] [--version] <file.tn>

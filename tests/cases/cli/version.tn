@@ -1,0 +1,3 @@
+// args: --version
+// expect-stdout:
+// tern 0.0.1
