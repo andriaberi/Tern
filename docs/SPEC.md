@@ -46,7 +46,7 @@ Tern follows a small set of syntactic conventions:
 | `->` | Specifies a function's return type | `fn add(val a, val b) -> val` |
 | `;` | Terminates simple statements | `val x = 10;` |
 
-Square brackets directly after `loop`, `in`, or `out` hold that construct's configuration; they are never array literals or indexing.
+Square brackets directly after `loop`, `in`, or `out` hold that construct's configuration; they are never array literals or indexing. Configuration always comes before the construct's body or data.
 
 ```tern
 loop [
@@ -54,7 +54,7 @@ loop [
     cond: i < 10;
     step: i++;
 ] => {
-    out [ text: "${i : int}"; ]
+    out "${i : int}";
 }
 ```
 
@@ -98,7 +98,7 @@ true      false     null
 
 The underscore `_` marks the default arm of a `when` and a skipped destination in `in`.
 
-The clause names `values`, `file`, `text`, and `overwrite`, and the format names `int`, `char`, and `bool`, are **contextual words**: they have special meaning only inside an `in [...]` or `out [...]` configuration or a `${...}` interpolation, and are ordinary identifiers everywhere else.
+The clause names `file` and `overwrite`, and the format names `int`, `char`, and `bool`, are **contextual words**: they have special meaning only inside an `in [...]` or `out [...]` configuration or a `${...}` interpolation, and are ordinary identifiers everywhere else.
 
 ### 2.4 Literals
 
@@ -237,13 +237,13 @@ when_arm  = ( expression | "_" ) ( "=>" block | ";" ) ;
 ```tern
 val result = when {
     x > 100 => {
-        out [ text: "Large"; ]
+        out "Large";
     }
     x > 50 => {
-        out [ text: "Medium"; ]
+        out "Medium";
     }
     _ => {
-        out [ text: "Small"; ]
+        out "Small";
     }
 }
 ```
@@ -267,7 +267,7 @@ val iterations = loop [
     cond: i < 10;
     step: i++;
 ] => {
-    out [ text: "${i : int}"; ]
+    out "${i : int}";
 }
 ```
 
@@ -287,7 +287,7 @@ fn add(val a, val b) -> val => {
 }
 
 fn greet() => {
-    out [ text: "Hello!"; ]
+    out "Hello!";
 }
 ```
 
@@ -334,33 +334,31 @@ export { square, cube };
 ### 3.10 Input and output
 
 ```ebnf
-input_stmt    = "in"  "[" { input_clause }  "]" ;
-input_clause  = "values" ":" "{" input_target { "," input_target } "}" ";"
-              | "file" ":" expression ";" ;
+input_stmt    = "in" [ "[" { input_clause } "]" ]
+                "{" input_target { "," input_target } "}" ";" ;
+input_clause  = "file" ":" expression ";" ;
 input_target  = postfix | "_" ;
 
-output_stmt   = "out" "[" { output_clause } "]" ;
-output_clause = "text" ":" expression ";"
-              | "file" ":" expression ";"
+output_stmt   = "out" [ "[" { output_clause } "]" ] expression ";" ;
+output_clause = "file" ":" expression ";"
               | "overwrite" ":" expression ";" ;
 ```
 
-Each clause may appear at most once.
+The optional `[...]` configuration comes first, followed by the data: a list of destinations for `in`, a string for `out`. Each clause may appear at most once.
 
 ```tern
-in [
-    values: { age, _, score };
-    file: "data.txt";
-]
+in { age, _, score };
+in [ file: "data.txt"; ] { age, score };
 
-out [
-    text: "Age: ${age : int}";
-    file: "log.txt";
-    overwrite: true;
-]
+out "Age: ${age : int}";
+out [ file: "log.txt"; overwrite: true; ] "Age: ${age : int}";
 ```
 
-`in` and `out` are configured entirely by named clauses. They have no executable body, so they do not use `=>`. Clauses are listed in [§10.5](#105-input) and [§10.6](#106-output).
+The data is not an executable block, so `in` and `out` do not use `=>`, and both statements end with `;`, including `in`, whose `{}` holds a list of names rather than code.
+
+A `[` directly after `in` or `out` always begins configuration. To output an array literal, wrap it in parentheses: `out (['h', 'i']);`.
+
+Clauses are described in [§10.5](#105-input) and [§10.6](#106-output).
 
 ### 3.11 Statements and blocks
 
@@ -632,11 +630,11 @@ Functions may share a name if their parameter lists differ in count or types. Re
 
 ```tern
 fn show(val x) => {
-    out [ text: "${x : int}"; ]
+    out "${x : int}";
 }
 
 fn show(val[] x) => {
-    out [ text: "${x : char[]}"; ]
+    out "${x : char[]}";
 }
 ```
 
@@ -651,10 +649,10 @@ fn show(val[] x) => {
 ```tern
 when {
     age >= 18 => {
-        out [ text: "Adult"; ]
+        out "Adult";
     }
     _ => {
-        out [ text: "Minor"; ]
+        out "Minor";
     }
 }
 ```
@@ -702,7 +700,7 @@ loop [
     cond: i < 10;
     step: i++;
 ] => {
-    out [ text: "${i : int}"; ]
+    out "${i : int}";
 }
 ```
 
@@ -732,7 +730,7 @@ An empty configuration creates an unconditional loop, which runs until `break`, 
 
 ```tern
 loop [] => {
-    out [ text: "Running"; ]
+    out "Running";
 }
 ```
 
@@ -766,7 +764,7 @@ val count = loop [
     cond: i < 5;
     step: i++;
 ] => {
-    out [ text: "${i : int}"; ]
+    out "${i : int}";
 }
 
 // count is 5
@@ -809,7 +807,7 @@ fn square(val x) -> val => {
 }
 
 fn greet() => {
-    out [ text: "Hello!"; ]
+    out "Hello!";
     return;
 }
 ```
@@ -872,9 +870,7 @@ Strings may embed values with `${expression : format}`.
 val age = 20;
 val[] name = "Alex";
 
-out [
-    text: "Hello, ${name : char[]}! Age: ${age : int}";
-]
+out "Hello, ${name : char[]}! Age: ${age : int}";
 ```
 
 Only primitives and strings can be formatted directly; other arrays, structures, and pointers cannot.
@@ -983,7 +979,7 @@ Every executable program starts in `main`.
 
 ```tern
 fn main() => {
-    out [ text: "Hello, world!"; ]
+    out "Hello, world!";
 }
 ```
 
@@ -1017,35 +1013,36 @@ export { square, cube };
 
 ### 10.5 Input
 
+`in` reads values into a list of destinations, in order. `_` skips a value.
+
 ```tern
-in [
-    values: { age, _, score };   // _ skips a value
-    file: "data.txt";            // optional
-]
+in { age, _, score };
+in [ file: "data.txt"; ] { age, score };
 ```
 
 | Clause | Meaning | Default |
 |---|---|---|
-| `values` | Destinations for input values, in order; `_` skips one | Required |
 | `file` | File to read from | Standard input |
 
 How incoming values are parsed and separated is not yet specified.
 
 ### 10.6 Output
 
+`out` writes one string, which may be any `char[]` expression, including an interpolated string.
+
 ```tern
-out [
-    text: "Hello, world!";
-    file: "log.txt";     // optional
-    overwrite: true;     // optional
-]
+out "Hello, world!";
+out greeting;
+out [ file: "log.txt"; ] "Hello, world!";
+out [ file: "log.txt"; overwrite: true; ] "New contents";
 ```
 
 | Clause | Meaning | Default |
 |---|---|---|
-| `text` | One formatted string to write | Required |
 | `file` | File to write to | Standard output |
-| `overwrite` | Replace file contents instead of appending | `false` |
+| `overwrite` | Replace the file's contents instead of appending | `false` |
+
+Writing to a file appends by default, so repeated `out` statements, such as one per loop iteration, build up the file line by line.
 
 ### 10.7 Runtime errors
 
@@ -1104,16 +1101,16 @@ fn main() => {
         score: 85
     };
 
-    out [ text: "Student: ${student.name : char[]}"; ]
-    out [ text: "Score: ${student.score : int}"; ]
+    out "Student: ${student.name : char[]}";
+    out "Score: ${student.score : int}";
 
     val category = classify(student.score);
 
     when {
-        category == 0 => { out [ text: "Excellent"; ] }
-        category == 1 => { out [ text: "Good"; ] }
-        category == 2 => { out [ text: "Pass"; ] }
-        _             => { out [ text: "Fail"; ] }
+        category == 0 => { out "Excellent"; }
+        category == 1 => { out "Good"; }
+        category == 2 => { out "Pass"; }
+        _             => { out "Fail"; }
     }
 
     val iterations = loop [
@@ -1121,10 +1118,10 @@ fn main() => {
         cond: i < 3;
         step: i++;
     ] => {
-        out [ text: "Iteration ${i : int}"; ]
+        out "Iteration ${i : int}";
     }
 
-    out [ text: "Total iterations: ${iterations : int}"; ]
+    out "Total iterations: ${iterations : int}";
 }
 ```
 
@@ -1173,8 +1170,10 @@ These need decisions before the specification is implementation-ready. They are 
 | Function with return type | `fn name() -> val => { ... }` |
 | Conditional | `when { condition => { ... } }` |
 | Loop | `loop [ cond: condition; ] => { ... }` |
-| Input | `in [ values: { x }; ]` |
-| Output | `out [ text: "Hello"; ]` |
+| Input | `in { x };` |
+| Input from file | `in [ file: "data.txt"; ] { x };` |
+| Output | `out "Hello";` |
+| Output to file | `out [ file: "log.txt"; ] "Hello";` |
 | Pointer | `@val p = &x;` |
 | Dereference | `@p` |
 | Allocation | `new Point {}` |
