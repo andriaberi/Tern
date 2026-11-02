@@ -1,6 +1,6 @@
 # Tern Language Specification
 
-**Version** 0.1.0 · **Status** Draft · **File extension** `.tn`
+**Version** 0.2.0 · **Status** Draft · **File extension** `.tn`
 
 Tern is a general-purpose programming language built around minimal syntax, predictable behavior, and explicit control over program execution and memory.
 
@@ -40,21 +40,18 @@ Tern follows a small set of syntactic conventions:
 | Syntax | Purpose | Example |
 |---|---|---|
 | `()` | Parameters, arguments, and grouping | `add(5, 10)`, `(a + b) * c` |
-| `[]` | Arrays, sizes, indexing, and keyword configuration | `[1, 2, 3]`, `val[4]`, `numbers[0]`, `loop [ ... ]` |
+| `[]` | Arrays, sizes, indexing, and configuration | `[1, 2, 3]`, `val[4]`, `numbers[0]`, `loop [ i < 10 ]` |
 | `{}` | Executable blocks, structures, `when` arms, and name lists | `struct Point { ... }`, `import math { square };` |
-| `=>` | Introduces an executable block | `fn main() => { ... }` |
+| `=>` | Separates a `when` condition from its block | `x > 0 => { ... }` |
 | `->` | Specifies a function's return type | `fn add(val a, val b) -> val` |
-| `;` | Terminates simple statements | `val x = 10;` |
+| `;` | Terminates simple statements and separates configuration parts | `val x = 10;`, `loop [ val i = 0; i < 10; i++ ]` |
+| `,` | Separates items in a list | `val i = 0, j = 10;`, `add(1, 2)` |
 
-Square brackets directly after `loop`, `in`, or `out` hold that construct's configuration; they are never array literals or indexing. Configuration always comes before the construct's body or data.
+Square brackets directly after `loop`, `in`, or `out` hold that construct's **configuration**; they are never array literals or indexing. Configuration always comes before the construct's body or data. Inside a configuration, `;` separates parts and `,` separates items within one part.
 
 ```tern
-loop [
-    init: val i = 0;
-    cond: i < 10;
-    step: i++;
-] => {
-    out "${i}";
+loop [ val i = 0 .. 10 ] {
+    out "${i}\n";
 }
 ```
 
@@ -101,13 +98,7 @@ true      false     null
 
 The underscore `_` marks the default arm of a `when` and a skipped destination in `in`.
 
-The following are **contextual words**: they have special meaning only in the place listed and are ordinary identifiers everywhere else.
-
-| Words | Special inside |
-|---|---|
-| `init`, `cond`, `step` | A `loop [...]` configuration |
-| `file`, `overwrite`, `newline` | An `in [...]` or `out [...]` configuration |
-| `int`, `char`, `bool` | The format part of a `${...}` interpolation |
+The format names `int`, `char`, and `bool` are **contextual words**: they have special meaning only in the format part of a `${...}` interpolation ([§8.5](#85-string-interpolation)) and are ordinary identifiers everywhere else.
 
 ### 2.4 Literals
 
@@ -171,16 +162,16 @@ A construct that ends in a block — `when`, `loop`, function declarations, and 
 
 ```tern
 when {
-    x > 0 => { out "positive"; }
+    x > 0 => { out "positive\n"; }
 }
 
-struct Point { val x; val y; }
+struct Point { val x, y; }
 ```
 
 Structure literals are data, not blocks, so the statement containing them still ends with a semicolon. So do `in` and `out`, whose `{}` and `[]` hold data and configuration rather than code.
 
 ```tern
-Point p = Point { x: 10, y: 20 };
+Point p = { x: 10, y: 20 };
 in { age };
 ```
 
@@ -197,7 +188,7 @@ program     = { import_stmt } { declaration } [ export_stmt ] ;
 declaration = variable_decl | function_decl | struct_decl ;
 ```
 
-Only declarations appear at the top level of a module; executable statements belong inside functions. A top-level `variable_decl` declares a global variable. An export statement, if present, must be the last item in its module.
+Only declarations appear at the top level of a module; executable statements belong inside functions. A top-level `variable_decl` declares global variables. An export statement, if present, must be the last item in its module.
 
 ### 3.2 Types
 
@@ -228,19 +219,24 @@ math.Point
 ### 3.3 Variable declarations
 
 ```ebnf
-variable_decl = [ "const" ] type identifier [ "=" expression ] ";" ;
+variable_decl = decl_body ";" ;
+decl_body     = [ "const" ] type declarator { "," declarator } ;
+declarator    = identifier [ "=" expression ] ;
 ```
 
 ```tern
 val x;
 val y = 10;
+val i = 0, j = 10;
 
-const val MAX = 100;
+const val MIN = 1, MAX = 100;
 
 val[3] numbers = [1, 2, 3];
 val[] name = "Alex";
 val[3][3] matrix;
 ```
+
+One declaration may declare several variables of the same type ([§6.3](#63-several-variables-in-one-declaration)).
 
 ### 3.4 Conditionals
 
@@ -252,13 +248,13 @@ when_arm  = ( expression | "_" ) "=>" block ;
 ```tern
 when {
     x > 100 => {
-        out "Large";
+        out "Large\n";
     }
     x > 50 => {
-        out "Medium";
+        out "Medium\n";
     }
     _ => {
-        out "Small";
+        out "Small\n";
     }
 }
 ```
@@ -267,63 +263,61 @@ when {
 
 ### 3.5 Loops
 
-Loops use square brackets for configuration and curly braces for the body.
+A loop's configuration in square brackets is followed by its body. The number of parts in the configuration decides the loop's form.
 
 ```ebnf
-loop_stmt   = "loop" "[" { loop_clause } "]" "=>" block ;
-loop_clause = "init" ":" ( simple_stmt | block )
-            | "cond" ":" expression ";"
-            | "step" ":" ( simple_stmt | block ) ;
-simple_stmt = variable_decl | expression_stmt | step_stmt ;
+loop_stmt   = "loop" "[" [ loop_config ] "]" block ;
+loop_config = expression                                        (* condition *)
+            | "val" identifier "=" expression ".." expression   (* range *)
+            | [ loop_setup ] ";" [ expression ] ";" [ simple_list ] ;
+loop_setup  = decl_body | simple_list ;
+simple_list = simple_stmt { "," simple_stmt } ;
 ```
 
 ```tern
-loop [
-    init: val i = 0;
-    cond: i < 10;
-    step: i++;
-] => {
-    out "${i}";
-}
+loop [] { ... }                                  // forever
+loop [ x > 0 ] { ... }                           // while x > 0
+loop [ val i = 0 .. 10 ] { ... }                 // i = 0, 1, ..., 9
+loop [ val i = 0; i < 10; i++ ] { ... }          // setup; condition; step
+loop [ val i = 0, j = 10; i < j; i++, j-- ] { ... }
 ```
 
-Every clause is optional and may appear at most once. Clause order does not affect execution order. `loop` is a statement and produces no value. Semantics are defined in [§7.2](#72-loops).
+A configuration with a single part is a range if it has the form `val name = start .. end`, and a condition otherwise. A configuration with two parts is a compile-time error. `loop` is a statement and produces no value. Semantics are defined in [§7.2](#72-loops).
 
 ### 3.6 Functions
 
 ```ebnf
-function_decl  = "fn" identifier "(" [ parameter_list ] ")" [ "->" type ] "=>" block ;
+function_decl  = "fn" identifier "(" [ parameter_list ] ")" [ "->" type ] block ;
 parameter_list = parameter { "," parameter } ;
 parameter      = type identifier ;
 ```
 
 ```tern
-fn add(val a, val b) -> val => {
+fn add(val a, val b) -> val {
     return a + b;
 }
 
-fn greet() => {
-    out "Hello!";
+fn greet() {
+    out "Hello!\n";
 }
 ```
 
-A function without `-> type` returns no value.
+A function without `-> type` returns no value. Each parameter has its own type: `fn add(val a, b)` is a syntax error.
 
 ### 3.7 Structures
 
 ```ebnf
 struct_decl = "struct" identifier "{" { field_decl } "}" ;
-field_decl  = [ "const" ] type identifier [ "=" expression ] ";" ;
+field_decl  = decl_body ";" ;
 ```
 
 ```tern
 struct Point {
-    val x;
-    val y;
+    val x, y;
 }
 ```
 
-A field's default value, if given, must be a constant expression ([§6.4](#64-global-variables)).
+A field's default value, if given, must be a constant expression ([§6.5](#65-global-variables)).
 
 ### 3.8 Imports
 
@@ -351,65 +345,58 @@ export { square, cube };
 ### 3.10 Input and output
 
 ```ebnf
-input_expr    = "in" [ "[" { input_clause } "]" ]
-                "{" input_target { "," input_target } "}" ;
-input_clause  = "file" ":" expression ";" ;
-input_target  = postfix | "_" ;
+input_expr   = "in" [ "[" expression "]" ] "{" input_target { "," input_target } "}" ;
+input_target = postfix | "_" ;
 
-output_stmt   = "out" [ "[" { output_clause } "]" ] expression ";" ;
-output_clause = "file" ":" expression ";"
-              | "overwrite" ":" expression ";"
-              | "newline" ":" expression ";" ;
+output_stmt  = "out" [ "[" expression [ ";" expression ] "]" ] expression ";" ;
 ```
 
-The optional `[...]` configuration comes first, followed by the data: a list of destinations for `in`, the text to write for `out`. Each clause may appear at most once.
+The optional configuration in `[...]` names a file, followed for `out` by an optional overwrite flag. Then comes the data: a list of destinations for `in`, the text to write for `out`.
 
 ```tern
 in { age, _, score };
-in [ file: "data.txt"; ] { age, score };
+in [ "data.txt" ] { age, score };
 
-out "Age: ${age}";
-out [ file: "log.txt"; overwrite: true; ] "Age: ${age}";
+out "Age: ${age}\n";
+out [ "log.txt" ] "Age: ${age}\n";
+out [ "log.txt"; true ] "Fresh log\n";   // true: empty the file first
 ```
 
 `in` is an expression that evaluates to the number of destinations filled ([§10.5](#105-input)), so it can stand alone as a statement or appear in a condition:
 
 ```tern
-loop [ cond: in { x } == 1; ] => {
-    out "Read ${x}";
+loop [ in { x } == 1 ] {
+    out "Read ${x}\n";
 }
 ```
 
-The data is not an executable block, so `in` and `out` do not use `=>`.
+The data is not an executable block. A `[` directly after `in` or `out` always begins configuration; to output an array literal, wrap it in parentheses: `out (['h', 'i']);`.
 
-A `[` directly after `in` or `out` always begins configuration. To output an array literal, wrap it in parentheses: `out (['h', 'i']);`.
-
-Clauses are described in [§10.5](#105-input) and [§10.6](#106-output).
+Semantics are defined in [§10.5](#105-input) and [§10.6](#106-output).
 
 ### 3.11 Statements and blocks
 
 ```ebnf
-block     = "{" { statement } "}" ;
+block       = "{" { statement } "}" ;
 
-statement = variable_decl
-          | expression_stmt
-          | step_stmt
-          | when_stmt
-          | loop_stmt
-          | return_stmt
-          | "break" ";"
-          | "continue" ";"
-          | "delete" unary ";"
-          | output_stmt ;
+statement   = variable_decl
+            | simple_stmt ";"
+            | when_stmt
+            | loop_stmt
+            | return_stmt
+            | "break" ";"
+            | "continue" ";"
+            | "delete" unary ";"
+            | output_stmt ;
 
-expression_stmt = expression [ assign_op expression ] ";" ;
-assign_op       = "=" | "+=" | "-=" | "*=" | "/=" | "%=" ;
-step_stmt       = postfix ( "++" | "--" ) ";" ;
-return_stmt     = "return" [ expression ] ";" ;
+simple_stmt = expression [ assign_op expression ]
+            | postfix ( "++" | "--" ) ;
+assign_op   = "=" | "+=" | "-=" | "*=" | "/=" | "%=" ;
+return_stmt = "return" [ expression ] ";" ;
 ```
 
 - Assignment is a statement, not an expression: it produces no value and cannot be nested in another expression. Its left side must be assignable: a variable, a field (`p.x`), an indexed element (`a[i]`), or a dereference (`@p`).
-- An expression statement without an assignment must be a function call or an `in` expression; anything else, such as `x + 1;`, is a compile-time error.
+- A simple statement without an assignment or `++`/`--` must be a function call or an `in` expression; anything else, such as `x + 1;`, is a compile-time error.
 - `x++` and `x--` are statements equivalent to `x += 1;` and `x -= 1;`.
 - The operand of `delete` must be assignable ([§9.3](#93-deallocation)).
 
@@ -441,10 +428,13 @@ primary        = integer_lit | char_lit | string_lit
                | "(" expression ")" ;
 
 array_lit      = "[" expression { "," expression } "]" ;
-struct_lit     = type_name "{" [ field_init { "," field_init } ] "}" ;
+struct_lit     = [ type_name ] struct_body ;
+struct_body    = "{" [ field_init { "," field_init } ] "}" ;
 field_init     = identifier ":" expression ;
-new_expr       = "new" ( struct_lit | base_type "[" expression "]" ) ;
+new_expr       = "new" ( type_name struct_body | base_type "[" expression "]" ) ;
 ```
+
+A structure literal may leave out its type name only where the type is already known ([§6.8](#68-structure-initialization)).
 
 ---
 
@@ -469,7 +459,7 @@ Parentheses override precedence:
 val result = (a + b) * c;
 ```
 
-Assignment, `++`, and `--` are not operators: they form statements of their own ([§3.11](#311-statements-and-blocks)).
+Assignment, `++`, and `--` are not operators: they form statements of their own ([§3.11](#311-statements-and-blocks)). `..` is not an operator either: it appears only in a range loop ([§7.3](#73-range-loops)).
 
 ---
 
@@ -492,7 +482,7 @@ val x = 'A';
 x = x + 1;           // 66, the code of 'B'
 ```
 
-Wherever a condition is expected (`when` arms, `cond`, `!`, `&&`, `||`), the operand must be a `val`; zero is false and any other value is true.
+Wherever a condition is expected (`when` arms, loop conditions, `!`, `&&`, `||`), the operand must be a `val`; zero is false and any other value is true.
 
 ### 5.2 Fixed-size arrays
 
@@ -566,10 +556,10 @@ Fields may be `val`, fixed-size arrays, slices, other structures, or pointers. S
 Two structure values are compatible only if they have the same declared structure type.
 
 ```tern
-struct Point  { val x; val y; }
-struct Vector { val x; val y; }
+struct Point  { val x, y; }
+struct Vector { val x, y; }
 
-Point p = Point {};
+Point p = {};
 Vector v = p; // Error: identical fields, different types
 ```
 
@@ -643,7 +633,21 @@ const val MIN;       // Error: missing initializer
 @val p = &MAX;       // Error: address of a constant
 ```
 
-### 6.3 Default initialization
+### 6.3 Several variables in one declaration
+
+A declaration may declare several variables, separated by commas. The type, and `const` if present, apply to every name; each name may have its own initializer.
+
+```tern
+val i = 0, j = 10;
+val x, y;              // both 0
+const val LOW = 1, HIGH = 9;
+val[3] a, b;           // both val[3]
+@val p, q;             // both pointers to val
+```
+
+Names are declared from left to right, and each is in scope from the next declarator on, so `val i = 0, j = i + 1;` is valid. This form is allowed for local and global variables, structure fields, and a loop's setup; parameters are declared one per type.
+
+### 6.4 Default initialization
 
 All storage is zero-initialized unless explicitly initialized.
 
@@ -655,7 +659,7 @@ All storage is zero-initialized unless explicitly initialized.
 | Fixed-size array | Every element at its default |
 | Structure | Every field at its declared default, or its type's default |
 
-### 6.4 Global variables
+### 6.5 Global variables
 
 A global variable's initializer, like a structure field's default, must be a constant expression: a literal, `null`, or an array or structure literal built only from constant expressions. Calls, variables, operators, and `new` are not allowed.
 
@@ -665,7 +669,7 @@ val[] greeting = "Hello";
 val bad = limit * 2;  // Error: initializer is not constant
 ```
 
-### 6.5 Scope
+### 6.6 Scope
 
 Tern uses lexical block scoping: every executable `{}` block introduces a new scope.
 
@@ -681,7 +685,7 @@ when {
 // y is not accessible here.
 ```
 
-### 6.6 Shadowing
+### 6.7 Shadowing
 
 An inner scope may shadow an outer variable. The inner name refers to a separate variable.
 
@@ -695,34 +699,41 @@ when {
 }
 ```
 
-### 6.7 Structure initialization
+### 6.8 Structure initialization
 
 Structures are initialized by field name. Omitted mutable fields receive their default values; constant fields must be initialized explicitly.
 
 ```tern
-Point p = Point {
-    x: 10,
-    y: 20
-};
+Point p = Point { x: 10, y: 20 };
+Point q = { x: 10, y: 20 };       // type name left out
 ```
 
-### 6.8 Function overloading
+The type name may be left out wherever the expected structure type is already known:
+
+- The initializer of a declaration, and the right side of an assignment.
+- A `return` value.
+- A field value inside another structure literal, and an element of an array literal whose type is known.
+- A function argument, provided the call matches exactly one overload ([§6.9](#69-function-overloading)).
+
+Elsewhere, and after `new`, the name is required.
+
+### 6.9 Function overloading
 
 Functions may share a name if their parameter lists differ in count or types. Return type alone cannot distinguish overloads.
 
 ```tern
-fn show(val x) => {
-    out "${x}";
+fn show(val x) {
+    out "${x}\n";
 }
 
-fn show(val[] x) => {
+fn show(val[] x) {
     out x;
 }
 ```
 
-A call selects the overload whose parameter types match the argument types exactly, allowing only the conversions in [§5.10](#510-conversions). If no overload matches, or more than one does, the call is a compile-time error. `main` cannot be overloaded.
+A call selects the overload whose parameter types match the argument types exactly, allowing only the conversions in [§5.10](#510-conversions). A structure literal without a type name matches any structure parameter in its position. If no overload matches, or more than one does, the call is a compile-time error. `main` cannot be overloaded.
 
-### 6.9 Parameters
+### 6.10 Parameters
 
 Arguments are passed by value: a `val`, fixed-size array, or structure is copied into the parameter. Passing a slice or pointer copies the slice or pointer, not the elements it refers to.
 
@@ -737,10 +748,10 @@ Arguments are passed by value: a `val`, fixed-size array, or structure is copied
 ```tern
 when {
     age >= 18 => {
-        out "Adult";
+        out "Adult\n";
     }
     _ => {
-        out "Minor";
+        out "Minor\n";
     }
 }
 ```
@@ -752,111 +763,99 @@ when {
 
 ### 7.2 Loops
 
-Tern has a single loop construct, configured by three optional clauses:
+`loop` handles all repetition. Its configuration has zero, one, or three parts:
 
-| Clause | Purpose | When omitted |
+| Configuration | Form | Runs |
 |---|---|---|
-| `init` | Runs once before the loop | Nothing runs |
-| `cond` | Decides whether the next iteration begins | Treated as `true` |
-| `step` | Runs after each iteration | Nothing runs |
+| `[]` | Infinite | Until `break`, `return`, or a runtime error |
+| `[ condition ]` | Conditional | While the condition is true |
+| `[ val i = start .. end ]` | Range | Once for each `i` from `start` up to, but not including, `end` |
+| `[ setup; condition; step ]` | Three-part | Setup once, then while the condition is true, running the step after each iteration |
 
 ```tern
-loop [
-    init: val i = 0;
-    cond: i < 10;
-    step: i++;
-] => {
-    out "${i}";
+loop [ x > 0 ] {
+    x--;
+}
+```
+
+### 7.3 Range loops
+
+A range loop counts a new variable upward by one:
+
+```tern
+loop [ val i = 0 .. 3 ] {
+    out "${i}\n";        // 0, 1, 2
+}
+```
+
+`start` and `end` are each evaluated once, before the first iteration. If `end` is not greater than `start`, the body never runs. The loop is equivalent to the three-part loop `[ val i = start; i < end; i++ ]`, except that `end` is not re-evaluated.
+
+### 7.4 Three-part loops
+
+```tern
+loop [ val i = 0; i < 10; i++ ] {
+    out "${i}\n";
 }
 ```
 
 Execution always proceeds in this order:
 
-1. Run `init`.
-2. Evaluate `cond`; if false, the loop ends.
+1. Run the setup.
+2. Evaluate the condition; if false, the loop ends.
 3. Run the body.
-4. Run `step`.
+4. Run the step.
 5. Repeat from step 2.
 
-### 7.3 While-style loops
-
-A loop with only a `cond` clause behaves like a traditional `while` loop.
+Any part may be left empty: an empty setup or step does nothing, and an empty condition is always true.
 
 ```tern
-loop [
-    cond: x > 0;
-] => {
-    x--;
+loop [ ; i < 10; i++ ] { ... }   // i was declared earlier
+```
+
+The setup is either one declaration, which may declare several variables, or a comma-separated list of simple statements. The step is a comma-separated list of simple statements, run left to right.
+
+```tern
+loop [ val i = 0, j = 10; i < j; i++, j-- ] {
+    // i and j move toward each other.
 }
 ```
 
-### 7.4 Infinite loops
+Variables declared in the setup or by a range are visible in the condition, the step, and the body, but not after the loop.
 
-An empty configuration creates an unconditional loop, which runs until `break`, `return`, or a runtime error ends it.
+### 7.5 Break
 
-```tern
-loop [] => {
-    out "Running";
-}
-```
-
-### 7.5 Multi-statement clauses
-
-`init` and `step` may each contain a block. The `init` block does not open a scope of its own: variables declared in it belong to the loop's scope, which covers `cond`, `step`, and the body, and ends with the loop.
+`break` ends the nearest enclosing loop immediately. The step is skipped.
 
 ```tern
-loop [
-    init: {
-        val i = 0;
-        val j = 10;
-    }
-    cond: i < j;
-    step: {
-        i++;
-        j--;
-    }
-] => {
-    // Loop body.
-}
-```
-
-### 7.6 Break
-
-`break` ends the nearest enclosing loop immediately. The `step` clause is skipped.
-
-```tern
-loop [] => {
+loop [] {
     break;
 }
 ```
 
-### 7.7 Continue
+### 7.6 Continue
 
-`continue` skips the rest of the current body. The `step` clause then runs before `cond` is evaluated again.
+`continue` skips the rest of the current body. In a three-part or range loop, the step then runs before the condition is evaluated again.
 
 ```tern
-loop [
-    init: val i = 0;
-    cond: i < 10;
-    step: i++;
-] => {
+loop [ val i = 0 .. 10 ] {
     when {
         i == 5 => { continue; }
     }
+    out "${i}\n";
 }
 ```
 
-### 7.8 Return
+### 7.7 Return
 
 `return` exits a function with a value. A function without a return type may use `return;` to exit early.
 
 ```tern
-fn square(val x) -> val => {
+fn square(val x) -> val {
     return x * x;
 }
 
-fn greet() => {
-    out "Hello!";
+fn greet() {
+    out "Hello!\n";
     return;
 }
 ```
@@ -902,7 +901,7 @@ To test whether a slice is empty, compare its length: `s.len == 0`.
 Assignment uses `=`. Values of type `val`, fixed-size arrays, and structures are copied:
 
 ```tern
-Point a = Point { x: 10, y: 20 };
+Point a = { x: 10, y: 20 };
 Point b = a;
 
 b.x = 50; // a.x is still 10
@@ -936,7 +935,7 @@ val age = 20;
 val[] name = "Alex";
 val initial = 'A';
 
-out "Hello, ${name}! Age: ${age}. Initial: ${initial : char}";
+out "Hello, ${name}! Age: ${age}. Initial: ${initial : char}\n";
 ```
 
 Writing a character, or text, writes the low 8 bits of each value as one byte. Other types (other arrays, structures, pointers) cannot be formatted. The expression inside `${...}` may not contain a string literal.
@@ -948,6 +947,7 @@ Evaluation is strictly left to right:
 - The operands of a binary operator, left before right (except where `&&` and `||` skip the right operand).
 - Function arguments, first to last, then the call.
 - In an assignment, the target's subexpressions (such as `i` in `a[i]`), then the right side.
+- Declarators in a declaration, and statements in a loop's setup or step list, first to last.
 - `in` destinations, first to last.
 
 `when` conditions are evaluated top to bottom, and only the first matching arm executes.
@@ -1054,11 +1054,11 @@ The following are undefined: the program may crash, misbehave, or appear to work
 Every executable program starts in `main`, declared in the file passed to the compiler. `main` takes no parameters and either returns no value or returns a `val`, which becomes the process's exit status. A `main` without a return type exits with status `0`.
 
 ```tern
-fn main() => {
-    out "Hello, world!";
+fn main() {
+    out "Hello, world!\n";
 }
 
-fn main() -> val => {
+fn main() -> val {
     return 0;
 }
 ```
@@ -1071,7 +1071,7 @@ Each source file is a module; no module declaration is needed. A module is loade
 import math;
 
 val r = math.square(5);
-math.Point p = math.Point { x: 1, y: 2 };
+math.Point p = { x: 1, y: 2 };
 ```
 
 Import cycles, direct or indirect, are a compile-time error.
@@ -1100,7 +1100,7 @@ export { square, cube };
 
 `in` and `out` are built in and need no import.
 
-`in` reads words separated by spaces, tabs, or newlines, and stores one word in each destination, in order. `_` reads a word and discards it.
+`in` reads words separated by spaces, tabs, or newlines, and stores one word in each destination, in order. `_` reads a word and discards it. Without configuration it reads standard input; `in [ path ]` reads the file at `path`, which must be text (`val[]` or `val[N]`).
 
 | Destination type | What is stored |
 |---|---|
@@ -1113,43 +1113,34 @@ val[32] buffer;
 val[] name = buffer;
 
 in { name, age };   // input "Alex 20": name is "Alex", age is 20
+in [ "people.txt" ] { name, age };
 ```
 
 `in` evaluates to the number of destinations filled, counting `_`. When input ends early, the remaining destinations are left unchanged and the count is lower than the number of destinations; at end of input it is `0`.
 
 It is a runtime error if a `val` word is not a decimal integer or is out of range, or if a word is longer than its destination slice.
 
-| Clause | Meaning | Default |
-|---|---|---|
-| `file` | File to read from, as text (`val[]` or `val[N]`) | Standard input |
-
 ### 10.6 Output
 
-`out` writes text — a `val[]` or `val[N]`, or a string with interpolation ([§8.5](#85-string-interpolation)) — followed by a newline.
+`out` writes text — a `val[]` or `val[N]`, or a string with interpolation ([§8.5](#85-string-interpolation)) — exactly as given. It adds no newline; write `\n` where a line should end.
 
 ```tern
-out "Hello, world!";
+out "Hello, world!\n";
 out greeting;
-out [ newline: false; ] "Name: ";
-out [ file: "log.txt"; ] "Hello, world!";
-out [ file: "log.txt"; overwrite: true; ] "New contents";
+out "Name: ";                                // a prompt: no newline
+out [ "log.txt" ] "Hello, world!\n";         // appended to log.txt
+out [ "log.txt"; true ] "New contents\n";    // log.txt emptied first
 ```
 
-| Clause | Meaning | Default |
-|---|---|---|
-| `file` | File to write to, as text | Standard output |
-| `overwrite` | If true, empty the file before this write | `false` |
-| `newline` | If false, write no newline after the text | `true` |
-
-Writing to a file appends by default, so repeated `out` statements, such as one per loop iteration, build up the file line by line.
+Without configuration, `out` writes to standard output. `out [ path ]` appends to the file at `path`, which must be text. `out [ path; overwrite ]` takes a `val` as a second part: if it is true, the file is emptied before this write; if false, the write appends as usual.
 
 ### 10.7 Files
 
 The runtime keeps at most one open input stream and one open output stream per path for the whole run, and closes them when the program exits.
 
 - The first `in` from a path opens it; later `in` statements on the same path continue where the previous one stopped.
-- The first `out` to a path opens it for appending; later `out` statements continue writing to it. `overwrite: true` empties the file, then writes.
-- Standard output is flushed before every read from standard input, so a prompt written with `newline: false` appears first.
+- The first `out` to a path opens it for appending, creating it if needed; later `out` statements continue writing to it. An overwrite flag that is true empties the file at that statement, and writing continues from there.
+- Standard output is flushed before every read from standard input, so a prompt appears before the program waits.
 
 A file that cannot be opened is a runtime error. Reading and writing the same path in one run is not supported in this version.
 
@@ -1186,7 +1177,8 @@ Exact wording is not part of the language's semantics. Representative examples:
 | Size mismatch | `val[3] a = [1, 2];` | `error: cannot assign 'val[2]' to 'val[3]'` |
 | Invalid comparison | `a == b` where both are `val[]` | `error: comparison is not supported for slice types`<br>`note: compare lengths with '.len'` |
 | Constant modification | `MAX = 200;` where `MAX` is `const` | `error: cannot assign to constant 'MAX'` |
-| Missing return | `fn f() -> val => { }` | `error: function 'f' does not return a value on every path` |
+| Loop configuration | `loop [ val i = 0; i < 10 ] { }` | `error: a loop configuration has 0, 1, or 3 parts, not 2` |
+| Missing return | `fn f() -> val { }` | `error: function 'f' does not return a value on every path` |
 | Recursive structure | `struct Node { Node next; }` | `error: recursive structure definition`<br>`note: use '@Node' to store a pointer instead` |
 
 ---
@@ -1200,7 +1192,7 @@ struct Student {
     val score;
 }
 
-fn grade(val score) -> val => {
+fn grade(val score) -> val {
     when {
         score >= 90 => { return 'A'; }
         score >= 75 => { return 'B'; }
@@ -1209,26 +1201,22 @@ fn grade(val score) -> val => {
     }
 }
 
-fn main() => {
-    Student student = Student {
+fn main() {
+    Student student = {
         id: 1,
         name: "Alex",
         score: 85
     };
 
-    out "Student: ${student.name}";
-    out "Score: ${student.score}";
-    out "Grade: ${grade(student.score) : char}";
+    out "Student: ${student.name}\n";
+    out "Score: ${student.score}\n";
+    out "Grade: ${grade(student.score) : char}\n";
 
     val[3] squares;
 
-    loop [
-        init: val i = 0;
-        cond: i < squares.len;
-        step: i++;
-    ] => {
+    loop [ val i = 0 .. squares.len ] {
         squares[i] = i * i;
-        out "Square ${i}: ${squares[i]}";
+        out "Square ${i}: ${squares[i]}\n";
     }
 }
 ```
@@ -1248,7 +1236,7 @@ Square 2: 4
 
 ## Appendix A. Not in this version
 
-These are deliberately left out of version 0.1.
+These are deliberately left out of version 0.2.
 
 | Feature | Notes |
 |---|---|
@@ -1258,7 +1246,8 @@ These are deliberately left out of version 0.1.
 | Import aliases and nested module paths | Modules are files in the same directory |
 | Non-ASCII identifiers | |
 | Array sizes from named constants | Sizes are integer literals |
-| Sub-slices | Such as `s[1..3]` |
+| Sub-slices | Such as `s[1 .. 3]` |
+| Counting down or by other steps in a range loop | Use a three-part loop |
 | Empty array literals | `[]` with no elements |
 | Interpolation outside `out` | |
 | Reading and writing the same file in one run | |
@@ -1270,21 +1259,26 @@ These are deliberately left out of version 0.1.
 | Construct | Syntax |
 |---|---|
 | Variable | `val x = 10;` |
+| Several variables | `val i = 0, j = 10;` |
 | Constant | `const val x = 10;` |
 | Fixed-size array | `val[3] a = [1, 2, 3];` |
 | Slice | `val[] s = "Hi";` |
 | Length | `s.len` |
-| Structure | `struct Point { val x; val y; }` |
-| Function | `fn name() => { ... }` |
-| Function with return type | `fn name() -> val => { ... }` |
+| Structure | `struct Point { val x, y; }` |
+| Structure literal | `Point p = { x: 1, y: 2 };` |
+| Function | `fn name() { ... }` |
+| Function with return type | `fn name() -> val { ... }` |
 | Conditional | `when { condition => { ... } _ => { ... } }` |
-| Loop | `loop [ init: ...; cond: ...; step: ...; ] => { ... }` |
+| Infinite loop | `loop [] { ... }` |
+| Conditional loop | `loop [ x > 0 ] { ... }` |
+| Range loop | `loop [ val i = 0 .. 10 ] { ... }` |
+| Three-part loop | `loop [ val i = 0, j = 9; i < j; i++, j-- ] { ... }` |
 | Input | `in { x };` |
 | Input with count | `val n = in { x, y };` |
-| Input from file | `in [ file: "data.txt"; ] { x };` |
-| Output | `out "x is ${x}";` |
-| Output without newline | `out [ newline: false; ] "Name: ";` |
-| Output to file | `out [ file: "log.txt"; ] "Hello";` |
+| Input from file | `in [ "data.txt" ] { x };` |
+| Output | `out "x is ${x}\n";` |
+| Output to file | `out [ "log.txt" ] "Hello\n";` |
+| Overwrite a file | `out [ "log.txt"; true ] "Hello\n";` |
 | Pointer | `@val p = &x;` |
 | Dereference | `@p` |
 | Field through pointer | `p.x` |
