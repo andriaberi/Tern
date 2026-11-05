@@ -92,6 +92,7 @@ hex_digit   = digit | "a" … "f" | "A" … "F" ;
 char_lit    = "'" ( char | escape ) "'" ;
 string_lit  = "\"" { char | escape | interpolation } "\"" ;
 escape      = "\\" ( "n" | "t" | "r" | "0" | "\\" | "'" | "\"" | "$" | "x" hex_digit hex_digit ) ;
+interpolation = "${" expression "}" ;   (* only in an out or err text, §10.5 *)
 ```
 
 | Kind | Examples | Type |
@@ -102,7 +103,7 @@ escape      = "\\" ( "n" | "t" | "r" | "0" | "\\" | "'" | "\"" | "$" | "x" hex_d
 | Null | `null` | Any pointer or slice ([§5.11](#511-conversions)) |
 | String | `"Hello"`, `"Hi\n"` | `[]char` |
 
-- A decimal literal must not exceed `2147483647`. The one exception is `2147483648`, which may appear directly after a unary `-` and then denotes `-2147483648`.
+- A decimal literal must not exceed `2147483647`. The one exception is `2147483648`, which may appear directly after a unary `-`, or after the `-` of a `when` pattern ([§7.4](#74-when-with-a-subject)), and then denotes `-2147483648`.
 - A hexadecimal literal may be up to `0xFFFFFFFF` and denotes the `int` with that 32-bit pattern: `0xFFFFFFFF` is `-1`.
 - In a character literal, `char` is one printable ASCII character (codes 32 to 126) other than `'` and `\`. The literal's value is the character's code, or the escape's value; `'\xFF'` is the byte `FF`.
 - In a string literal, `char` is any source character other than a newline, `\`, or `"`. The string holds one element per byte of its UTF-8 encoding and has no terminator.
@@ -160,7 +161,7 @@ declarator    = identifier [ "=" expression ] ;
 function_decl = "fn" identifier "(" [ param { "," param } ] ")" [ "->" type ] block ;
 param         = type identifier ;
 struct_decl   = "struct" identifier "{" { field_decl } "}" ;
-enum_decl     = "enum" identifier "{" variant { "," variant } "}" ;
+enum_decl     = "enum" identifier "{" variant { [ "," ] variant } [ "," ] "}" ;
 variant       = identifier [ "{" { field_decl } "}" ] ;
 field_decl    = type declarator { "," declarator } ";" ;
 ```
@@ -263,7 +264,7 @@ The grammar is decided by tokens alone, using these rules:
 2. **`when` statements and expressions.** A `when` at the start of a statement is a `when` statement; anywhere else it is a `when` expression.
 3. **Structure literals.** Where a primary begins with an identifier, the parser reads up to three dot-separated identifiers. If the next token is `{`, they are the `qualified` name of a structure literal; otherwise the dots are member accesses. The exception is the expression directly after `when`, where a `{` that is not inside parentheses or square brackets ends the expression and begins the arms: write `when (E.V { ... }) { ... }` to use a literal there.
 4. **Loop configurations.** The parser reads the first part of the configuration. If `..` follows, the loop is a range; the first part must then be `int name = start`. If `;` follows, the loop is three-part, and the configuration must contain exactly two `;` at its top level. If `]` follows, the first part is a condition and must be an expression. A configuration with exactly one top-level `;` (two parts) is a compile-time error.
-5. **Prefix and postfix.** Postfix operators bind tighter than prefix ones: `@p.x` is `@(p.x)` and `-a[i]` is `-(a[i])`. `&` and `*` are unary where an operand is expected and binary after one.
+5. **Prefix and postfix.** Postfix operators bind tighter than prefix ones: `@p.x` is `@(p.x)` and `-a[i]` is `-(a[i])`. `&` and `-` are unary where an operand is expected and binary after one.
 6. **Simple statements.** A simple statement without an assignment, `++`, or `--` must be a call or an `in` expression; `x + 1;` is a compile-time error.
 7. **Arm bodies.** The statement after `=>` in a `when` statement may not be a declaration.
 8. **`_` in `in`.** `_` is accepted as an `in_target`, and nowhere else in an expression.
@@ -519,9 +520,9 @@ The left side of an assignment, `++`, `--`, `&`, `in`, or `delete` must be **ass
 
 ```tern
 when {
-    x > 100 -> out ("large\n");
-    x > 50  -> out ("medium\n");
-    _       -> out ("small\n");
+    x > 100 => out ("large\n");
+    x > 50  => out ("medium\n");
+    _       => out ("small\n");
 }
 ```
 
@@ -529,7 +530,7 @@ Each condition is a `bool`. Arms are tested from top to bottom, and only the fir
 
 ### 7.3 `when` with one condition
 
-`when condition -> body` runs the body if the `bool` condition is true. It has no `_` arm.
+`when condition => body` runs the body if the `bool` condition is true. It has no `_` arm.
 
 ```tern
 when x > 0 => count++;
@@ -551,9 +552,9 @@ when line.len == 0 => {
 
 ```tern
 when ch {
-    'a', 'e', 'i', 'o', 'u' -> vowels++;
-    ' ', '\n'           -> { }
-    _                   -> others++;
+    'a', 'e', 'i', 'o', 'u' => vowels++;
+    ' ', '\n'           => { }
+    _                   => others++;
 }
 ```
 
@@ -565,9 +566,9 @@ when ch {
 
 ```tern
 when e {
-    Num n   -> out ("${n.value}");
-    Add a   -> { show(a.left); out (" + "); show(a.right); }
-    Neg n   -> { out ("-"); show(n.operand); }
+    Num n   => out ("${n.value}");
+    Add a   => { show(a.left); out (" + "); show(a.right); }
+    Neg n   => { out ("-"); show(n.operand); }
 }
 ```
 
@@ -609,8 +610,8 @@ A loop may have a label between `loop` and its configuration. `break` ends the n
 ```tern
 loop rows [int r = 0 .. grid.len] {
     loop [int c = 0 .. grid[r].len] {
-        when grid[r][c] == target -> break rows;
-        when grid[r][c] < 0 -> continue rows;
+        when grid[r][c] == target => break rows;
+        when grid[r][c] < 0 => continue rows;
     }
 }
 ```
